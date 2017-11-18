@@ -46,6 +46,7 @@ class Node extends Actor {
           case None =>
             println("Elected " + (messages + candidateId).max)
             children.foreach(_ ! LeaderElected((messages + candidateId).max))
+            messages.clear()
         }
     case LeaderElected(leaderId) =>
       println("Elected " + leaderId)
