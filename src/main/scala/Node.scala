@@ -19,26 +19,28 @@ class Node extends Actor {
 
   override def receive: Receive = {
     case HandshakeRequest(_id) =>
-      children += sender()
+      children += sender
       println("Child attached " + _id)
-      sender() ! HandShakeResponse(id)
+      sender ! HandShakeResponse(id)
     case HandShakeResponse(_id) =>
-      parentNode = sender()
+      parentNode = sender
       println("Parent attached " + _id)
     case AssignInitiator =>
+      println("Starting election")
       Option(parentNode).foreach(_ ! BeginElection)
       if (children.nonEmpty)
         children.foreach(_ ! BeginElection)
       else
         Option(parentNode).foreach(_ ! ElectionCandidate(id))
     case BeginElection =>
-      println("Invited")
+      println("Invited to join election by " + sender)
       Option(parentNode).filterNot(_ == sender).foreach(_ ! BeginElection)
       if (children.nonEmpty)
         children.filterNot(_ == sender).foreach(_ ! BeginElection)
       else
         Option(parentNode).foreach(_ ! ElectionCandidate(id))
     case ElectionCandidate(candidateId) =>
+      println("Candidate " + candidateId + " suggested by " + sender)
       messages += candidateId
       if (messages.size == children.size)
         Option(parentNode) match {
