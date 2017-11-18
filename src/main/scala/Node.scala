@@ -1,4 +1,4 @@
-import Node._
+import Node.{parentNode, _}
 import akka.actor._
 import com.typesafe.config.ConfigFactory
 
@@ -14,8 +14,6 @@ class Node extends Actor {
 
   override def preStart(): Unit = if (id != parentId) {
     val parentNode = context.actorSelection("akka.tcp://RemoteSystem@" + parent + ":5150/user/" + parentId)
-    println("Parent found: " + parentNode)
-
     parentNode ! HandshakeRequest(id)
   }
 
@@ -27,25 +25,31 @@ class Node extends Actor {
     case HandShakeResponse(_id) =>
       parentNode = sender()
       println("Parent attached " + _id)
-    case BeginElection =>
-      println("Joined election")
+    case AssignInitiator =>
+      Option(parentNode).foreach(_ ! BeginElection)
       if (children.nonEmpty)
-        (children - sender()).foreach(_ ! BeginElection)
-      else if (!Option(parentNode).contains(sender()))
-        Option(parentNode).foreach(_ ! BeginElection)
+        children.foreach(_ ! BeginElection)
       else
         Option(parentNode).foreach(_ ! ElectionCandidate(id))
-    case ElectionCandidate(candidate) =>
-      println("Proposed leader: " + candidate)
-      messages += candidate
+    case BeginElection =>
+      println("Invited")
+      Option(parentNode).filterNot(_ == sender).foreach(_ ! BeginElection)
+      if (children.nonEmpty)
+        children.filterNot(_ == sender).foreach(_ ! BeginElection)
+      else
+        Option(parentNode).foreach(_ ! ElectionCandidate(id))
+    case ElectionCandidate(candidateId) =>
+      messages += candidateId
       if (messages.size == children.size)
-        if (Option(parentNode).isEmpty)
-          children.foreach(_ ! LeaderElected((messages + id).max))
-        else
-          parentNode ! ElectionCandidate((messages + id).max)
+        Option(parentNode) match {
+          case Some(p) => p ! ElectionCandidate((messages + candidateId).max)
+          case None =>
+            println("Elected " + (messages + candidateId).max)
+            children.foreach(_ ! LeaderElected((messages + candidateId).max))
+        }
     case LeaderElected(leaderId) =>
+      println("Elected " + leaderId)
       children.foreach(_ ! LeaderElected(leaderId))
-      println("Leader elected: " + leaderId)
   }
 
   override def hashCode(): Int = super.hashCode()
@@ -71,13 +75,12 @@ object Node {
     val system = ActorSystem("RemoteSystem", config)
     root.getString("node-id")
 
-    system.actorOf(Props[Node], name = id)
+    val localActor = system.actorOf(Props[Node], name = id)
 
     while (true)
       StdIn.readLine match {
         case "elect" =>
-          parentNode ! BeginElection
-          children.foreach(_ ! BeginElection)
+          localActor ! AssignInitiator
         case "shutdown" =>
           system.terminate()
         case _ =>
