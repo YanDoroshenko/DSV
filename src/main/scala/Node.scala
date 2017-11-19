@@ -17,6 +17,12 @@ class Node extends Actor {
     parentNode ! HandshakeRequest(id)
   }
 
+
+  override def postStop(): Unit = {
+    parentNode.foreach(_ ! ChildDied(children.toSet))
+    children.foreach(_ ! ParentDied(parentNode))
+  }
+
   override def receive: Receive = {
     case HandshakeRequest(_id) =>
       children += sender
@@ -25,6 +31,14 @@ class Node extends Actor {
     case HandShakeResponse(_id) =>
       parentNode = Option(sender)
       println("Parent attached " + _id)
+    case ParentDied(newParent) =>
+      parentNode = newParent
+      println("Parent died, new parent is " + newParent)
+    case ChildDied(orphans) =>
+      children -= sender
+      children ++= orphans
+      println("Child died, adopting orphans " + orphans)
+
     case AssignInitiator =>
       println("Starting election")
       parentNode.foreach(_ ! BeginElection)
