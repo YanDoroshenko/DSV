@@ -23,27 +23,27 @@ class Node extends Actor {
       println("Child attached " + _id)
       sender ! HandShakeResponse(id)
     case HandShakeResponse(_id) =>
-      parentNode = sender
+      parentNode = Option(sender)
       println("Parent attached " + _id)
     case AssignInitiator =>
       println("Starting election")
-      Option(parentNode).foreach(_ ! BeginElection)
+      parentNode.foreach(_ ! BeginElection)
       if (children.nonEmpty)
         children.foreach(_ ! BeginElection)
       else
-        Option(parentNode).foreach(_ ! ElectionCandidate(id))
+        parentNode.foreach(_ ! ElectionCandidate(id))
     case BeginElection =>
       println("Invited to join election by " + sender)
-      Option(parentNode).filterNot(_ == sender).foreach(_ ! BeginElection)
+      parentNode.filterNot(_ == sender).foreach(_ ! BeginElection)
       if (children.nonEmpty)
         children.filterNot(_ == sender).foreach(_ ! BeginElection)
       else
-        Option(parentNode).foreach(_ ! ElectionCandidate(id))
+        parentNode.foreach(_ ! ElectionCandidate(id))
     case ElectionCandidate(candidateId) =>
       println("Candidate " + candidateId + " suggested by " + sender)
       messages += candidateId
-      if (messages.size == children.size)
-        Option(parentNode) match {
+      if (messages.size == children.size) {
+        parentNode match {
           case Some(p) => p ! ElectionCandidate((messages + candidateId).max)
           case None =>
             println("Elected " + (messages + candidateId).max)
@@ -66,7 +66,7 @@ class Node extends Actor {
 
 object Node {
 
-  private var parentNode: ActorRef = _
+  private var parentNode: Option[ActorRef] = None
   private val children = mutable.Set[ActorRef]()
 
   private val messages = mutable.Set[String]()
