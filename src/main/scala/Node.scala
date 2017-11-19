@@ -41,11 +41,15 @@ class Node extends Actor {
 
     case AssignInitiator =>
       println("Starting election")
-      parentNode.foreach(_ ! BeginElection)
-      if (children.nonEmpty)
-        children.foreach(_ ! BeginElection)
-      else
-        parentNode.foreach(_ ! ElectionCandidate(id))
+      if (parentNode.isEmpty && children.isEmpty)
+        self ! LeaderElected(id)
+      else {
+        parentNode.foreach(_ ! BeginElection)
+        if (children.nonEmpty)
+          children.foreach(_ ! BeginElection)
+        else
+          parentNode.foreach(_ ! ElectionCandidate(id))
+      }
     case BeginElection =>
       println("Invited to join election by " + sender)
       parentNode.filterNot(_ == sender).foreach(_ ! BeginElection)
