@@ -21,6 +21,8 @@ class Node extends Actor {
   override def postStop(): Unit = {
     parentNode.foreach(_ ! ChildDied(children.toSet))
     children.foreach(_ ! ParentDied(parentNode))
+    if (leader.contains(self))
+      team.toSeq.head ! BeginElection
   }
 
   override def receive: Receive = {
@@ -51,6 +53,8 @@ class Node extends Actor {
           parentNode.foreach(_ ! ElectionCandidate(id, self))
       }
     case BeginElection =>
+      leader = None
+      team.clear()
       println("Invited to join election by " + sender)
       parentNode.filterNot(_ == sender).foreach(_ ! BeginElection)
       if (children.nonEmpty)
@@ -66,14 +70,44 @@ class Node extends Actor {
             p ! (candidates + c).maxBy(_.candidateId)
           case None =>
             val elected = candidates.maxBy(_.candidateId)
+            leader = Some(elected.candidate)
             println("Elected " + elected.candidateId)
             children.foreach(_ ! LeaderElected(elected))
+            leader.filterNot(self == _).foreach(_ ! JoinTeam)
         }
         candidates.clear()
       }
     case LeaderElected(elected) =>
+      leader = Some(elected.candidate)
       println("Elected " + elected.candidateId)
       children.foreach(_ ! LeaderElected(elected))
+      leader.filterNot(self == _).foreach(_ ! JoinTeam)
+    case JoinTeam =>
+      team += sender
+      sender ! "Yo m8, welcome to the team!"
+    case CollectData =>
+      leader match {
+        case Some(l) => l ! DataRequest
+        case None => println("No leader, do an election first")
+      }
+    case DataRequest =>
+      println("Recieved data request")
+      if (leader.contains(self)) {
+        requestedBy = Some(sender)
+        team.foreach(_ ! DataRequest)
+      }
+      else
+        sender ! DataChunk(data)
+    case chunk: DataChunk if leader.contains(self) =>
+      chunks += chunk
+      if (chunks.size == team.size) {
+        requestedBy.foreach(_ ! CompleteData(chunks.toSet + DataChunk(data)))
+        chunks.clear()
+      }
+    case CompleteData(dataChunks) =>
+      println("Got complete data: " + dataChunks.mkString(", "))
+    case m =>
+      println("Something unknown: " + m)
   }
 
   override def hashCode(): Int = super.hashCode()
@@ -86,15 +120,28 @@ class Node extends Actor {
 
 object Node {
 
+  private val config = ConfigFactory.load()
+  private val root = config.getConfig("app")
+  private val id = root.getString("node-id")
+
+  val data: Array[String] = Map(
+    "node-1" -> Array("Chunk 1", "Chunk 2"),
+    "node-2" -> Array("Chunk 3"),
+    "node-3" -> Array("Chunk 4"),
+    "node-4" -> Array("Chunk 5", "Chunk 6"),
+    "node-5" -> Array("Chunk 7")
+  )(id)
+
   private var parentNode: Option[ActorRef] = None
   private val children = mutable.Set[ActorRef]()
+  private var leader: Option[ActorRef] = None
+  private val team = mutable.Set[ActorRef]()
+  private val chunks = mutable.Set[DataChunk]()
+  private var requestedBy: Option[ActorRef] = None
 
   private val candidates = mutable.Set[ElectionCandidate]()
 
   def main(args: Array[String]) {
-    val config = ConfigFactory.load()
-    val root = config.getConfig("app")
-    val id = root.getString("node-id")
 
     val system = ActorSystem("RemoteSystem", config)
     root.getString("node-id")
@@ -107,6 +154,8 @@ object Node {
           localActor ! AssignInitiator
         case "shutdown" =>
           system.terminate()
+        case "data" =>
+          localActor ! CollectData
         case _ =>
       }
   }
