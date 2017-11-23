@@ -42,13 +42,13 @@ class Node extends Actor {
     case AssignInitiator =>
       println("Starting election")
       if (parentNode.isEmpty && children.isEmpty)
-        self ! LeaderElected(id)
+        self ! LeaderElected(ElectionCandidate(id, self))
       else {
         parentNode.foreach(_ ! BeginElection)
         if (children.nonEmpty)
           children.foreach(_ ! BeginElection)
         else
-          parentNode.foreach(_ ! ElectionCandidate(id))
+          parentNode.foreach(_ ! ElectionCandidate(id, self))
       }
     case BeginElection =>
       println("Invited to join election by " + sender)
@@ -56,22 +56,24 @@ class Node extends Actor {
       if (children.nonEmpty)
         children.filterNot(_ == sender).foreach(_ ! BeginElection)
       else
-        parentNode.foreach(_ ! ElectionCandidate(id))
-    case ElectionCandidate(candidateId) =>
-      println("Candidate " + candidateId + " suggested by " + sender)
-      messages += candidateId
-      if (messages.size == children.size) {
+        parentNode.foreach(_ ! ElectionCandidate(id, self))
+    case c: ElectionCandidate =>
+      println("Candidate with id" + c.candidateId + " suggested by " + sender)
+      candidates += c
+      if (candidates.size == children.size) {
         parentNode match {
-          case Some(p) => p ! ElectionCandidate((messages + candidateId).max)
+          case Some(p) =>
+            p ! (candidates + c).maxBy(_.candidateId)
           case None =>
-            println("Elected " + (messages + candidateId).max)
-            children.foreach(_ ! LeaderElected((messages + candidateId).max))
+            val elected = candidates.maxBy(_.candidateId)
+            println("Elected " + elected.candidateId)
+            children.foreach(_ ! LeaderElected(elected))
         }
-        messages.clear()
+        candidates.clear()
       }
-    case LeaderElected(leaderId) =>
-      println("Elected " + leaderId)
-      children.foreach(_ ! LeaderElected(leaderId))
+    case LeaderElected(elected) =>
+      println("Elected " + elected.candidateId)
+      children.foreach(_ ! LeaderElected(elected))
   }
 
   override def hashCode(): Int = super.hashCode()
@@ -87,7 +89,7 @@ object Node {
   private var parentNode: Option[ActorRef] = None
   private val children = mutable.Set[ActorRef]()
 
-  private val messages = mutable.Set[String]()
+  private val candidates = mutable.Set[ElectionCandidate]()
 
   def main(args: Array[String]) {
     val config = ConfigFactory.load()
