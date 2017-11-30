@@ -29,3 +29,5 @@ case class DataChunk(chunk: Array[String]) {
 case class CompleteData(chunks: Set[DataChunk])
 
 case class LeaderDied()
+
+case class TeamMemberDied()

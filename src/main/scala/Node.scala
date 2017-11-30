@@ -14,7 +14,7 @@ class Node extends Actor {
 
   override def preStart(): Unit = if (id != parentId) {
     val parentNode = context.actorSelection("akka.tcp://RemoteSystem@" + parent + ":5150/user/" + parentId)
-    parentNode ! HandshakeRequest(id)
+      parentNode ! HandshakeRequest(id)
   }
 
 
@@ -22,7 +22,9 @@ class Node extends Actor {
     parentNode.foreach(_ ! ChildDied(children.toSet))
     children.foreach(_ ! ParentDied(parentNode))
     if (leader.contains(self))
-      team.toSeq.head ! BeginElection
+      team.foreach(_ ! LeaderDied)
+    else
+      leader.foreach(_ ! TeamMemberDied)
   }
 
   override def receive: Receive = {
@@ -40,6 +42,13 @@ class Node extends Actor {
       children -= sender
       children ++= orphans
       println("Child died, adopting orphans " + orphans)
+    case LeaderDied =>
+      println("Leader died")
+      leader = None
+    case TeamMemberDied =>
+      println("Team member died")
+      team -= sender
+      println("Team is now:\n" + team.mkString("\n"))
 
     case AssignInitiator =>
       println("Starting election")
@@ -77,37 +86,37 @@ class Node extends Actor {
         }
         candidates.clear()
       }
-    case LeaderElected(elected) =>
-      leader = Some(elected.candidate)
-      println("Elected " + elected.candidateId)
-      children.foreach(_ ! LeaderElected(elected))
-      leader.filterNot(self == _).foreach(_ ! JoinTeam)
-    case JoinTeam =>
-      team += sender
-      sender ! "Yo m8, welcome to the team!"
-    case CollectData =>
-      leader match {
-        case Some(l) => l ! DataRequest
-        case None => println("No leader, do an election first")
-      }
-    case DataRequest =>
-      println("Recieved data request")
-      if (leader.contains(self)) {
-        requestedBy = Some(sender)
-        team.foreach(_ ! DataRequest)
-      }
-      else
-        sender ! DataChunk(data)
-    case chunk: DataChunk if leader.contains(self) =>
-      chunks += chunk
-      if (chunks.size == team.size) {
-        requestedBy.foreach(_ ! CompleteData(chunks.toSet + DataChunk(data)))
-        chunks.clear()
-      }
-    case CompleteData(dataChunks) =>
-      println("Got complete data: " + dataChunks.mkString(", "))
-    case m =>
-      println("Something unknown: " + m)
+          case LeaderElected(elected) =>
+            leader = Some(elected.candidate)
+            println("Elected " + elected.candidateId)
+            children.foreach(_ ! LeaderElected(elected))
+            leader.filterNot(self == _).foreach(_ ! JoinTeam)
+          case JoinTeam =>
+            team += sender
+            sender ! "Yo m8, welcome to the team!"
+          case CollectData =>
+            leader match {
+              case Some(l) => l ! DataRequest
+              case None => println("No leader, do an election first")
+            }
+              case DataRequest =>
+                println("Recieved data request")
+                if (leader.contains(self)) {
+                  requestedBy = Some(sender)
+                  team.foreach(_ ! DataRequest)
+                }
+                else
+                  sender ! DataChunk(data)
+              case chunk: DataChunk if leader.contains(self) =>
+                chunks += chunk
+                if (chunks.size == team.size) {
+                  requestedBy.foreach(_ ! CompleteData(chunks.toSet + DataChunk(data)))
+                  chunks.clear()
+                }
+              case CompleteData(dataChunks) =>
+                println("Got complete data: " + dataChunks.mkString(", "))
+              case m =>
+                println("Something unknown: " + m)
   }
 
   override def hashCode(): Int = super.hashCode()
@@ -152,7 +161,7 @@ object Node {
       StdIn.readLine match {
         case "elect" =>
           localActor ! AssignInitiator
-        case "shutdown" =>
+        case "die" =>
           system.terminate()
         case "data" =>
           localActor ! CollectData
