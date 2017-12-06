@@ -12,9 +12,12 @@ class Node extends Actor {
   private lazy val parent = root.getString("parent")
   private lazy val parentId = root.getString("parent-id")
 
-  override def preStart(): Unit = if (id != parentId) {
-    val parentNode = context.actorSelection("akka.tcp://RemoteSystem@" + parent + ":5150/user/" + parentId)
-    parentNode ! HandshakeRequest(id)
+  override def preStart(): Unit = {
+    println("Ready")
+    if (id != parentId) {
+      val parentNode = context.actorSelection("akka.tcp://RemoteSystem@" + parent + ":5150/user/" + parentId)
+        parentNode ! HandshakeRequest(id)
+    }
   }
 
 
@@ -86,52 +89,52 @@ class Node extends Actor {
         }
         candidates.clear()
       }
-    case LeaderElected(elected) =>
-      leader = Some(elected.candidate)
-      println("Elected " + elected.candidateId)
-      children.foreach(_ ! LeaderElected(elected))
-      leader.filterNot(self == _).foreach(_ ! JoinTeam)
-      if (requestedBy.contains(self)) {
-        Thread.sleep(1000L)
-        leader.foreach(_ ! DataRequest)
-        println("Requesting data")
-        requestedBy = None
-      }
-    case JoinTeam =>
-      team += sender
-      sender ! "Yo m8, welcome to the team!"
-    case CollectData =>
-      leader match {
-        case Some(l) => l ! DataRequest
-        case None =>
-          println("No leader, do an election first")
-          requestedBy = Some(self)
-          self ! AssignInitiator
-      }
-    case DataRequest =>
-      println("Recieved data request")
-      if (leader.contains(self)) {
-        requestedBy = Some(sender)
-        team.foreach((m) => {
-          println("Sending request to " + m)
-          m ! DataRequest
-        })
-      }
-      else {
-        sender ! DataChunk(data)
-        println("Sent chunk")
-      }
-    case chunk: DataChunk if leader.contains(self) =>
-      println("Recieved chunk")
-      chunks += chunk
-      if (chunks.size == team.size) {
-        requestedBy.foreach(_ ! CompleteData(chunks.toSet + DataChunk(data)))
-        chunks.clear()
-      }
-    case CompleteData(dataChunks) =>
-      println("Got complete data: " + dataChunks.mkString(", "))
-    case m =>
-      println("Something unknown: " + m)
+          case LeaderElected(elected) =>
+            leader = Some(elected.candidate)
+            println("Elected " + elected.candidateId)
+            children.foreach(_ ! LeaderElected(elected))
+            leader.filterNot(self == _).foreach(_ ! JoinTeam)
+            if (requestedBy.contains(self)) {
+              Thread.sleep(1000L)
+              leader.foreach(_ ! DataRequest)
+              println("Requesting data")
+              requestedBy = None
+            }
+          case JoinTeam =>
+            team += sender
+            sender ! "Yo m8, welcome to the team!"
+          case CollectData =>
+            leader match {
+              case Some(l) => l ! DataRequest
+              case None =>
+                println("No leader, do an election first")
+                requestedBy = Some(self)
+                self ! AssignInitiator
+            }
+              case DataRequest =>
+                println("Recieved data request")
+                if (leader.contains(self)) {
+                  requestedBy = Some(sender)
+                  team.foreach((m) => {
+                    println("Sending request to " + m)
+                    m ! DataRequest
+                  })
+                }
+                else {
+                  sender ! DataChunk(data)
+                  println("Sent chunk")
+                }
+              case chunk: DataChunk if leader.contains(self) =>
+                println("Recieved chunk")
+                chunks += chunk
+                if (chunks.size == team.size) {
+                  requestedBy.foreach(_ ! CompleteData(chunks.toSet + DataChunk(data)))
+                  chunks.clear()
+                }
+              case CompleteData(dataChunks) =>
+                println("Got complete data: " + dataChunks.mkString(", "))
+              case m =>
+                println("Something unknown: " + m)
   }
 
   override def hashCode(): Int = super.hashCode()
